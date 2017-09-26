@@ -1,0 +1,10 @@
+/.gitignore
+/.vscode
+/*.ts
+/coverage
+/node_modules
+/tests.js
+
+!/*.d.ts
+
+/tests.d.ts
