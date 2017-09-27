@@ -29,6 +29,7 @@ export enum FfflowState {
 
 export interface IFfflowTapper {
 	resolve: () => any
+	reject: (e?: any) => any
 	abort: () => any
 }
 
@@ -130,7 +131,11 @@ export class Ffflow<T extends object = object> {
 				if (this.isAborted()) {
 					tapper.abort()
 				} else {
-					tapper.resolve()
+					if (this.getError()) {
+						tapper.reject(this.getError())
+					} else {
+						tapper.resolve()
+					}
 				}
 			} catch (e) {
 				console.error(e)
@@ -209,11 +214,18 @@ export class Ffflow<T extends object = object> {
 	getData(): T {
 		return this.guts ? this.guts.data : {} as T
 	}
+	getError(): any {
+		return this.guts ? this.guts.error : undefined
+	}
 	tap(tapper: IFfflowTapper) {
 		this.untap(tapper)
 		this.tappers.push(tapper)
 		if (this.isDone()) {
-			tapper.resolve()
+			if (this.getError()) {
+				tapper.reject(this.getError())
+			} else {
+				tapper.resolve()
+			}
 		} else if (this.isAborted()) {
 			tapper.abort()
 		}

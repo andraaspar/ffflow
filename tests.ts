@@ -391,35 +391,42 @@ describe('Ffflow', () => {
 	})
 	describe('.tap()', () => {
 		it('is called immediately if done', () => {
-			let abortFunc = jasmine.createSpy('abortFunc')
-			let resolveFunc = jasmine.createSpy('resolveFunc')
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
 			let f = new Ffflow({ steps: [] })
 			f.start()
-			f.tap({ resolve: resolveFunc, abort: abortFunc })
-			expect(resolveFunc).toHaveBeenCalledTimes(1)
-			expect(abortFunc).not.toHaveBeenCalled()
+			f.tap({ resolve, reject, abort })
+			expect(resolve).toHaveBeenCalledTimes(1)
+			expect(reject).not.toHaveBeenCalled()
+			expect(abort).not.toHaveBeenCalled()
 		})
 		it('waits for tapped', () => {
-			let abortFunc = jasmine.createSpy('abortFunc')
-			let resolveFunc = jasmine.createSpy('resolveFunc')
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
 			let f = new Ffflow({ steps: [] })
-			f.tap({ resolve: resolveFunc, abort: abortFunc })
-			expect(resolveFunc).not.toHaveBeenCalled()
-			expect(abortFunc).not.toHaveBeenCalled()
+			f.tap({ resolve, reject, abort })
+			expect(resolve).not.toHaveBeenCalled()
+			expect(reject).not.toHaveBeenCalled()
+			expect(abort).not.toHaveBeenCalled()
 		})
 		it('works multiple times', () => {
-			let abortFunc = jasmine.createSpy('abortFunc')
-			let resolveFunc = jasmine.createSpy('resolveFunc')
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
 			let f = new Ffflow({ steps: [] })
-			f.tap({ resolve: resolveFunc, abort: abortFunc })
+			f.tap({ resolve, reject, abort })
 			f.start()
 			f.start()
-			expect(resolveFunc).toHaveBeenCalledTimes(2)
-			expect(abortFunc).not.toHaveBeenCalled()
+			expect(resolve).toHaveBeenCalledTimes(2)
+			expect(reject).not.toHaveBeenCalled()
+			expect(abort).not.toHaveBeenCalled()
 		})
 		it('propagates abort', () => {
-			let abortFunc = jasmine.createSpy('abortFunc')
-			let resolveFunc = jasmine.createSpy('resolveFunc')
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
 			let f = new Ffflow({
 				steps: [
 					(e, flow) => {
@@ -427,32 +434,77 @@ describe('Ffflow', () => {
 					},
 				]
 			})
-			f.tap({ resolve: resolveFunc, abort: abortFunc })
+			f.tap({ resolve, reject, abort })
 			f.start()
-			expect(abortFunc).toHaveBeenCalledTimes(1)
-			expect(resolveFunc).not.toHaveBeenCalled()
+			expect(resolve).not.toHaveBeenCalled()
+			expect(reject).not.toHaveBeenCalled()
+			expect(abort).toHaveBeenCalledTimes(1)
 		})
 		it('can be untapped', () => {
-			let abortFunc = jasmine.createSpy('abortFunc')
-			let resolveFunc = jasmine.createSpy('resolveFunc')
-			let tapper = { resolve: resolveFunc, abort: abortFunc }
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
+			let tapper = { resolve, reject, abort }
 			let f = new Ffflow({ steps: [] })
 			f.tap(tapper)
 			f.untap(tapper)
 			f.start()
-			expect(abortFunc).not.toHaveBeenCalled()
-			expect(resolveFunc).not.toHaveBeenCalled()
+			expect(resolve).not.toHaveBeenCalled()
+			expect(reject).not.toHaveBeenCalled()
+			expect(abort).not.toHaveBeenCalled()
 		})
 		it('adds a tapper only once', () => {
-			let abortFunc = jasmine.createSpy('abortFunc')
-			let resolveFunc = jasmine.createSpy('resolveFunc')
-			let tapper = { resolve: resolveFunc, abort: abortFunc }
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
+			let tapper = { resolve, reject, abort }
 			let f = new Ffflow({ steps: [] })
 			f.tap(tapper)
 			f.tap(tapper)
 			f.start()
-			expect(abortFunc).not.toHaveBeenCalled()
-			expect(resolveFunc).toHaveBeenCalledTimes(1)
+			expect(resolve).toHaveBeenCalledTimes(1)
+			expect(reject).not.toHaveBeenCalled()
+			expect(abort).not.toHaveBeenCalled()
+		})
+		it('propagates reject reason', (done) => {
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let f = new Ffflow({ steps: [
+				(e, flow) => {
+					flow.reject('error')
+				}
+			] })
+			f.tap({
+				abort,
+				resolve,
+				reject: (e) => {
+					expect(e).toBe('error')
+					expect(resolve).not.toHaveBeenCalled()
+					expect(abort).not.toHaveBeenCalled()
+					done()
+				},
+			})
+			f.start()
+		})
+		it('propagates error thrown', (done) => {
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let f = new Ffflow({ steps: [
+				(e, flow) => {
+					throw 'error'
+				}
+			] })
+			f.tap({
+				abort,
+				resolve,
+				reject: (e) => {
+					expect(e).toBe('error')
+					expect(resolve).not.toHaveBeenCalled()
+					expect(abort).not.toHaveBeenCalled()
+					done()
+				},
+			})
+			f.start()
 		})
 	})
 })
