@@ -6,16 +6,18 @@ export interface IFfflowGutsBase<T extends object> {
 	isAborted: () => boolean
 }
 export interface IFfflowGuts<T extends object> extends IFfflowGutsBase<T> {
+	getParallelErrors: () => any[] | undefined
 	resolve: () => void
 	reject: (e?: any) => void
-	abort: () => void
+	abort: (e?: any) => void
 }
 interface IFfflowGutsPrivate<T extends object> extends IFfflowGutsBase<T> {
 	state: FfflowState
 	error: any
+	isParallelErrorNew: boolean
 	resolve: (subStep: IFfflowStep<T> | undefined) => void
-	reject: (subStep: IFfflowStep<T>, e: any) => void
-	abort: (subStep: IFfflowStep<T>) => void
+	reject: (subStep: IFfflowStep<T>, e?: any) => void
+	abort: (subStep: IFfflowStep<T>, e?: any) => void
 }
 export type TStep<T extends object> = IFfflowStep<T> | (IFfflowStep<T> | undefined)[] | undefined
 export type TSteps<T extends object> = TStep<T>[]
@@ -30,7 +32,7 @@ export enum FfflowState {
 export interface IFfflowTapper {
 	resolve: () => any
 	reject: (e?: any) => any
-	abort: () => any
+	abort: (e?: any) => any
 }
 
 export class Ffflow<T extends object = object> {
@@ -49,14 +51,15 @@ export class Ffflow<T extends object = object> {
 	}
 	start() {
 		// this.log('start')
-		this.abort()
+		this.abort('[owxs4w] start')
 		this.next()
 		return this
 	}
-	abort() {
+	abort(e?: any) {
 		// this.log('abort')
 		if (this.getState() === FfflowState.Working) {
 			this.setState(FfflowState.Aborted)
+			this.guts.error = e
 			this.onDone()
 		}
 		if (this.getState() !== FfflowState.Stopped) this.newGuts()
@@ -68,29 +71,28 @@ export class Ffflow<T extends object = object> {
 		let guts: IFfflowGutsPrivate<T> = {
 			data: {} as T,
 			error: undefined,
+			isParallelErrorNew: false,
 			resolve: (subStep) => {
 				// this.log('guts.resolve')
 				if (this.isCurrentGutsAndSubStep(guts, subStep)) {
 					// this.log('-- valid')
 					// this.log(JSON.stringify(guts, undefined, 2), JSON.stringify(this.guts, undefined, 2))
-					guts.error = undefined
-					this.onStepDone(guts, subStep)
+					this.onStepDone(guts, subStep, undefined)
 				}
 			},
 			reject: (subStep, e) => {
 				// this.log('guts.reject')
 				if (this.isCurrentGutsAndSubStep(guts, subStep)) {
 					// this.log('-- valid')
-					guts.error = e || new Error()
-					this.onStepDone(guts, subStep)
+					this.onStepDone(guts, subStep, e || new Error())
 				}
 			},
-			abort: (subStep) => {
+			abort: (subStep, e) => {
 				// this.log('guts.abort')
 				if (this.isCurrentGutsAndSubStep(guts, subStep)) {
 					// this.log('-- valid')
-					this.abort()
-					this.onStepDone(guts, subStep)
+					this.abort(e)
+					this.onStepDone(guts, subStep, undefined)
 				}
 			},
 			isAborted: () => {
@@ -104,12 +106,15 @@ export class Ffflow<T extends object = object> {
 	private next() {
 		// this.log('next')
 		this.stepIndex++
+		this.guts.isParallelErrorNew = false
 		if (this.stepIndex < this.steps.length) {
 			let step = this.steps[this.stepIndex]
 			if (Array.isArray(step)) {
 				if (step.length) {
 					this.step = step.slice()
+					let guts = this.guts
 					for (let subStep of step) {
+						if (this.guts !== guts) break
 						this.doStep(subStep)
 					}
 				} else {
@@ -129,7 +134,7 @@ export class Ffflow<T extends object = object> {
 		for (let tapper of this.tappers) {
 			try {
 				if (this.isAborted()) {
-					tapper.abort()
+					tapper.abort(this.getError())
 				} else {
 					if (this.getError()) {
 						tapper.reject(this.getError())
@@ -154,8 +159,9 @@ export class Ffflow<T extends object = object> {
 					data: guts.data,
 					resolve: () => guts.resolve(step),
 					reject: (e) => guts.reject(step, e),
-					abort: () => guts.abort(step),
+					abort: (e) => guts.abort(step, e),
 					isAborted: () => guts.isAborted(),
+					getParallelErrors: () => guts.isParallelErrorNew ? guts.error : undefined,
 				})
 			} catch (e) {
 				guts.reject(step, e)
@@ -178,17 +184,33 @@ export class Ffflow<T extends object = object> {
 		}
 		return result
 	}
-	private onStepDone(guts: IFfflowGutsPrivate<T>, subStep: IFfflowStep<T> | undefined) {
+	private onStepDone(guts: IFfflowGutsPrivate<T>, subStep: IFfflowStep<T> | undefined, stepError: any) {
 		// this.log('onStepDone')
 		if (this.isCurrentGutsAndSubStep(guts, subStep)) {
 			if (Array.isArray(this.step)) {
+				if (stepError) {
+					if (!this.guts.isParallelErrorNew) {
+						this.guts.isParallelErrorNew = true
+						this.guts.error = []
+					}
+					this.guts.error.push(stepError)
+				}
 				for (let i = this.step.length - 1; i >= 0; i--) {
 					if (this.step[i] === subStep) {
 						this.step.splice(i, 1)
 					}
 				}
+			} else {
+				this.guts.error = stepError
 			}
-			if (!Array.isArray(this.step) || this.step.length == 0) {
+			if (!Array.isArray(this.step)) {
+				this.next()
+			} else if (this.step.length == 0) {
+				// Parallel end
+				if (!this.guts.isParallelErrorNew) {
+					// No new errors
+					this.guts.error = undefined
+				}
 				this.next()
 			}
 		}
@@ -227,7 +249,7 @@ export class Ffflow<T extends object = object> {
 				tapper.resolve()
 			}
 		} else if (this.isAborted()) {
-			tapper.abort()
+			throw new Error(`[owxut2] never`)
 		}
 		return this
 	}

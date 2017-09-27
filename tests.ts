@@ -388,9 +388,190 @@ describe('Ffflow', () => {
 			f.start()
 			expect(doneFunc).toHaveBeenCalledTimes(1)
 		})
+		it('handles errors', (done) => {
+			let f = new Ffflow({
+				steps: [
+					(e, flow) => {
+						throw 'error'
+					},
+					[
+						(e, flow) => {
+							flow.resolve()
+						},
+						(e, flow) => {
+							flow.resolve()
+						},
+					],
+					(e, flow) => {
+						expect(e).toBe(undefined)
+						done()
+					},
+				]
+			})
+			f.start()
+		})
+		it('handles previous multi errors', (done) => {
+			let f = new Ffflow({
+				steps: [
+					[
+						(e, flow) => {
+							flow.reject()
+						},
+						(e, flow) => {
+							flow.reject()
+						},
+					],
+					[
+						(e, flow) => {
+							flow.resolve()
+						},
+						(e, flow) => {
+							flow.resolve()
+						},
+					],
+					(e, flow) => {
+						expect(e).toBe(undefined)
+						done()
+					},
+				]
+			})
+			f.start()
+		})
+		it('keeps the error from any branch', (done) => {
+			let f = new Ffflow({
+				steps: [
+					[
+						(e, flow) => {
+							flow.reject('error')
+						},
+						(e, flow) => {
+							flow.resolve()
+						},
+					],
+					(e, flow) => {
+						expect(e).toEqual(['error'])
+						done()
+					},
+				]
+			})
+			f.start()
+		})
+		it('keeps all errors', (done) => {
+			let f = new Ffflow({
+				steps: [
+					[
+						(e, flow) => {
+							setTimeout(() => flow.reject('a'))
+						},
+						(e, flow) => {
+							setTimeout(() => flow.reject('b'), 10)
+						},
+					],
+					(e, flow) => {
+						expect(e).toEqual(['a', 'b'])
+						done()
+					},
+				]
+			})
+			f.start()
+		})
+		it('propagates first abort reason', (done) => {
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
+			let f = new Ffflow({
+				steps: [
+					[
+						(e, flow) => {
+							setTimeout(() => flow.abort('a'))
+						},
+						(e, flow) => {
+							setTimeout(() => flow.abort('b'), 10)
+						},
+					],
+				]
+			})
+			f.tap({
+				resolve,
+				reject,
+				abort: (e) => {
+					expect(resolve).not.toHaveBeenCalled()
+					expect(reject).not.toHaveBeenCalled()
+					expect(e).toBe('a')
+					done()
+				},
+			})
+			f.start()
+		})
+		it('propagates parallel errors', (done) => {
+			let f = new Ffflow({
+				steps: [
+					[
+						(e, flow) => {
+							setTimeout(() => {
+								expect(flow.getParallelErrors()).toBeUndefined()
+								flow.reject('a')
+							})
+						},
+						(e, flow) => {
+							setTimeout(() => {
+								expect(flow.getParallelErrors()).toEqual(['a'])
+								flow.reject('b')
+							}, 10)
+						},
+						(e, flow) => {
+							setTimeout(() => {
+								expect(flow.getParallelErrors()).toEqual(['a', 'b'])
+								done()
+							}, 20)
+						},
+					],
+				]
+			})
+			f.start()
+		})
+		it('propagates does not include old errors in parallel errors', (done) => {
+			let f = new Ffflow({
+				steps: [
+					(e, flow) => {
+						throw 'error'
+					},
+					[
+						(e, flow) => {
+							setTimeout(() => {
+								expect(flow.getParallelErrors()).toBeUndefined()
+								done()
+							})
+						}
+					],
+				]
+			})
+			f.start()
+		})
+		it('handles abort', (done) => {
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
+			let f = new Ffflow({
+				steps: [
+					[
+						(e, flow) => flow.abort('a'),
+						(e, flow) => flow.abort('b'),
+					],
+				]
+			})
+			f.tap({
+				resolve,
+				reject,
+				abort: (e) => {
+					expect(e).toBe('a')
+					done()
+				},
+			})
+			f.start()
+		})
 	})
 	describe('.tap()', () => {
-		it('is called immediately if done', () => {
+		it('is resolved immediately if done', () => {
 			let abort = jasmine.createSpy('abort')
 			let resolve = jasmine.createSpy('resolve')
 			let reject = jasmine.createSpy('reject')
@@ -399,6 +580,19 @@ describe('Ffflow', () => {
 			f.tap({ resolve, reject, abort })
 			expect(resolve).toHaveBeenCalledTimes(1)
 			expect(reject).not.toHaveBeenCalled()
+			expect(abort).not.toHaveBeenCalled()
+		})
+		it('is rejected immediately if done', () => {
+			let abort = jasmine.createSpy('abort')
+			let resolve = jasmine.createSpy('resolve')
+			let reject = jasmine.createSpy('reject')
+			let f = new Ffflow({ steps: [
+				(e, flow) => flow.reject(),
+			] })
+			f.start()
+			f.tap({ resolve, reject, abort })
+			expect(resolve).not.toHaveBeenCalled()
+			expect(reject).toHaveBeenCalledTimes(1)
 			expect(abort).not.toHaveBeenCalled()
 		})
 		it('waits for tapped', () => {
